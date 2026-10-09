@@ -1,0 +1,44 @@
+{
+  "name": "clive-desktop",
+  "productName": "CliveEdit Desktop",
+  "version": "0.1.0",
+  "description": "Cross-platform markdown editor with PDF export, built on CliveEdit",
+  "main": "./out/main/index.js",
+  "author": "Christian <christian.muehle@devowl.de>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Dev-Owl/clive_desktop.git"
+  },
+  "homepage": "https://github.com/Dev-Owl/clive_desktop#readme",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "@dev_owl/cliveedit": "^0.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitejs/plugin-vue": "^6.0.9",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.7",
+    "vue": "^3.5.0",
+    "vue-tsc": "^3.0.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "electron-winstaller@5.4.0": true
+  }
+}
