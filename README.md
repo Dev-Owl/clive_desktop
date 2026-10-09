@@ -36,6 +36,31 @@ npm run dist:linux
 Output goes to `dist/`. Builds are unsigned; configure signing in
 `electron-builder.yml` before distributing.
 
+## Releases
+
+Installers are built by GitHub Actions (`.github/workflows/release.yml`):
+
+1. Bump `version` in `package.json` and commit.
+2. Tag and push: `git tag v0.1.0 && git push origin v0.1.0`
+   (the tag must match the `package.json` version).
+3. The workflow builds on macOS, Windows and Linux and attaches the
+   installers to a **draft** release — review it and click *Publish*.
+
+You can also run the workflow manually from the *Actions* tab to just build
+the installers (downloadable as workflow artifacts).
+
+| Platform | Files |
+| --- | --- |
+| macOS (Apple Silicon / Intel) | `.dmg`, `.zip` (`arm64` / `x64`) |
+| Windows (x64) | `.exe` installer |
+| Linux (x64) | `.AppImage`, `.deb` |
+
+Because the builds are not code-signed, first launch needs one extra step:
+
+- **macOS:** right-click the app → *Open*, or run
+  `xattr -cr "/Applications/CliveEdit Desktop.app"` if macOS says it is damaged.
+- **Windows:** SmartScreen → *More info* → *Run anyway*.
+
 ## How local images work
 
 The markdown is never rewritten. The renderer sets

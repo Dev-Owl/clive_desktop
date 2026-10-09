@@ -22,10 +22,8 @@
     "dist:win": "npm run build && electron-builder --win",
     "dist:linux": "npm run build && electron-builder --linux"
   },
-  "dependencies": {
-    "@dev_owl/cliveedit": "^0.2.3"
-  },
   "devDependencies": {
+    "@dev_owl/cliveedit": "^0.2.4",
     "@types/node": "^24.0.0",
     "@vitejs/plugin-vue": "^6.0.9",
     "electron": "^44.7.0",
