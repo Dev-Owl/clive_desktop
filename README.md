@@ -57,8 +57,10 @@ the installers (downloadable as workflow artifacts).
 
 Because the builds are not code-signed, first launch needs one extra step:
 
-- **macOS:** right-click the app → *Open*, or run
-  `xattr -cr "/Applications/CliveEdit Desktop.app"` if macOS says it is damaged.
+- **macOS:** the app is ad-hoc signed, not notarized. Open it once, then go to
+  *System Settings → Privacy & Security* and click *Open Anyway*. Alternatively
+  run `xattr -cr "/Applications/CliveEdit Desktop.app"` once.
+  (v0.0.1 was unsigned and shows as "damaged" — use the `xattr` command for it.)
 - **Windows:** SmartScreen → *More info* → *Run anyway*.
 
 ## How local images work

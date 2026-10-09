@@ -17,6 +17,15 @@ fileAssociations:
     role: Editor
 mac:
   category: public.app-category.productivity
+  # Ad-hoc signature ("-"): no Apple Developer account needed. Without a valid
+  # signature macOS reports downloaded apps as "damaged"; ad-hoc signed apps
+  # can be opened via System Settings → Privacy & Security → Open Anyway.
+  # Replace with a Developer ID identity (plus notarization) to remove the
+  # warning entirely.
+  identity: '-'
+  # Hardened runtime is only needed for notarization and breaks ad-hoc
+  # signed Electron apps (library validation). Enable it with a real identity.
+  hardenedRuntime: false
   target:
     - target: dmg
       arch: [arm64, x64]

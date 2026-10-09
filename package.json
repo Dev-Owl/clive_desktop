@@ -1,7 +1,7 @@
 {
   "name": "clive-desktop",
   "productName": "CliveEdit Desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Cross-platform markdown editor with PDF export, built on CliveEdit",
   "main": "./out/main/index.js",
   "author": "Christian <christian.muehle@devowl.de>",
