@@ -5,6 +5,23 @@ export interface OpenedFile {
   content: string
 }
 
+/** An image the user wants to insert (picked, dropped or pasted). */
+export interface ImageRequest {
+  /** Path of the document being edited, null while unsaved */
+  docPath: string | null
+  /** Image file on disk, null for clipboard images (screenshots) */
+  filePath: string | null
+  name: string
+  mime: string
+  /** Image data when there is no file on disk */
+  bytes: Uint8Array | null
+}
+
+export interface ResolvedImage {
+  src: string
+  alt: string
+}
+
 export type ThemeSetting = 'system' | 'light' | 'dark'
 
 export type UnsavedChoice = 'save' | 'discard' | 'cancel'
@@ -28,6 +45,11 @@ export interface DesktopApi {
   saveFile(path: string, content: string): Promise<{ ok: true } | { error: string }>
   saveAsDialog(suggestedName: string, content: string): Promise<string | null>
   exportPdf(markdown: string, docPath: string | null, title: string): Promise<string | null>
+
+  /* images */
+  pickImage(): Promise<string | null>
+  /** Ask whether to embed or link the image; null when cancelled. */
+  resolveImage(request: ImageRequest): Promise<ResolvedImage | null>
 
   /* recent documents */
   getRecent(): Promise<string[]>

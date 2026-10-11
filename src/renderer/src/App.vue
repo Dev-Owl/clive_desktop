@@ -56,7 +56,13 @@
 
     <main class="workspace">
       <div v-for="tab in tabs" v-show="tab.id === activeId" :key="tab.id" class="doc">
-        <CliveEdit v-model="tab.content" :toolbar-items="toolbarItems" placeholder="Start writing…" />
+        <CliveEdit
+          v-model="tab.content"
+          :toolbar-items="toolbarItems"
+          :on-image-upload="(file: File) => uploadImage(tab, file)"
+          :max-image-size="MAX_IMAGE_BYTES"
+          placeholder="Start writing…"
+        />
       </div>
 
       <section v-if="!tabs.length" class="welcome">
@@ -84,15 +90,24 @@
       </section>
     </main>
 
+    <LinkDialog
+      v-if="linkRequest"
+      :initial-text="linkRequest.text"
+      @confirm="linkRequest.done($event)"
+      @cancel="linkRequest.done(null)"
+    />
+
     <div v-if="toast" class="toast" role="status">{{ toast }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CliveEdit, defaultToolbarItems } from '@dev_owl/cliveedit'
+import type { EditorContext, ToolbarItem } from '@dev_owl/cliveedit'
 import type { MenuAction, ThemeSetting } from '../../shared/api'
 import { setDocumentBase } from './baseHref'
+import LinkDialog from './LinkDialog.vue'
 
 interface Tab {
   id: number
@@ -107,9 +122,22 @@ interface Tab {
 
 const api = window.api
 
-// The built-in print button prints a hidden iframe, which comes out blank in
-// Electron. PDF output goes through "Export PDF" instead.
-const toolbarItems = defaultToolbarItems.filter((item) => item.action !== 'print')
+/* ---- Toolbar ----
+ * - Print is dropped: it prints a hidden iframe, which comes out blank in
+ *   Electron. PDF output goes through "Export PDF" instead.
+ * - Image and link use window.prompt(), which Electron does not implement,
+ *   so they are replaced by a file picker and an in-app link dialog. */
+const toolbarItems: ToolbarItem[] = defaultToolbarItems
+  .filter((item) => item.action !== 'print')
+  .map((item): ToolbarItem => {
+    const { action: _action, ...base } = item
+    if (item.action === 'image') return { ...base, label: 'Insert Image…', onClick: insertImageFromDisk }
+    if (item.action === 'link') return { ...base, onClick: insertLink }
+    return item
+  })
+
+/** Lets CliveEdit accept large images; the embed dialog warns about size. */
+const MAX_IMAGE_BYTES = 100 * 1024 * 1024
 
 const tabs = ref<Tab[]>([])
 const activeId = ref<number | null>(null)
@@ -316,6 +344,84 @@ function cycleTheme(): void {
   api.setTheme(next)
 }
 
+/* ---- Images ---- */
+
+function markdownImage(alt: string, src: string): string {
+  return `![${alt.replace(/[[\]\\]/g, '')}](${src})`
+}
+
+/** Toolbar button: pick a file, then embed or link it. */
+async function insertImageFromDisk(ctx: EditorContext): Promise<void> {
+  const tab = activeTab.value
+  if (!tab) return
+  const filePath = await api.pickImage()
+  if (!filePath) return
+  const image = await api.resolveImage({ docPath: tab.path, filePath, name: '', mime: '', bytes: null })
+  if (image) ctx.insertMarkdown(markdownImage(image.alt, image.src))
+}
+
+/**
+ * Paste and drag & drop: CliveEdit calls this for image files and inserts
+ * the returned URL. Throwing (on cancel) makes it insert nothing.
+ */
+async function uploadImage(tab: Tab, file: File): Promise<string> {
+  const filePath = api.pathForFile(file) || null
+  const bytes = filePath ? null : new Uint8Array(await file.arrayBuffer())
+  const image = await api.resolveImage({ docPath: tab.path, filePath, name: file.name, mime: file.type, bytes })
+  if (!image) throw new Error('Image insert cancelled')
+  return image.src
+}
+
+/* ---- Links ---- */
+
+const linkRequest = ref<{ text: string; done: (link: { url: string; text: string } | null) => void } | null>(null)
+
+function askForLink(text: string): Promise<{ url: string; text: string } | null> {
+  return new Promise((resolve) => {
+    linkRequest.value = {
+      text,
+      done: (link) => {
+        linkRequest.value = null
+        resolve(link)
+      },
+    }
+  })
+}
+
+async function insertLink(ctx: EditorContext): Promise<void> {
+  // Markdown mode wraps the selection in [text](url) without prompting.
+  if (ctx.mode === 'markdown') {
+    ctx.link()
+    return
+  }
+  const link = await askForLink(window.getSelection()?.toString() ?? '')
+  if (!link) return
+  const url = link.url.replace(/ /g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29')
+  const text = (link.text || link.url).replace(/[[\]\\]/g, '\\$&')
+  ctx.insertMarkdown(`[${text}](${url})`)
+}
+
+/* ---- Shortcuts CliveEdit would route to prompt() / iframe printing ---- */
+
+function onShortcut(event: KeyboardEvent): void {
+  const mod = event.metaKey || event.ctrlKey
+  if (!mod || event.altKey) return
+  const key = event.key.toLowerCase()
+
+  if (key === 'p') {
+    event.preventDefault()
+    event.stopPropagation()
+    exportPdf()
+  } else if (key === 'k' && !event.shiftKey) {
+    const editor = (event.target as HTMLElement | null)?.closest?.('.cliveedit')
+    if (!editor?.querySelector('.ce-wysiwyg')?.contains(event.target as Node)) return
+    event.preventDefault()
+    event.stopPropagation()
+    // Go through the toolbar button so the handler gets the editor context.
+    editor.querySelector<HTMLButtonElement>('.ce-toolbar button[aria-label="Link"]')?.click()
+  }
+}
+
 /* ---- Recent ---- */
 
 async function clearRecent(): Promise<void> {
@@ -354,6 +460,7 @@ const menuHandlers: Record<MenuAction, () => void> = {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', onShortcut, true)
   api.onMenu((action) => menuHandlers[action]?.())
   api.onOpenPaths((paths) => paths.forEach(openPath))
   api.onRecentChanged((paths) => (recent.value = paths))
@@ -363,4 +470,6 @@ onMounted(async () => {
   recent.value = await api.getRecent()
   api.rendererReady()
 })
+
+onBeforeUnmount(() => window.removeEventListener('keydown', onShortcut, true))
 </script>

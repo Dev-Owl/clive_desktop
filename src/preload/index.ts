@@ -13,6 +13,9 @@ const api: DesktopApi = {
   exportPdf: (markdown, docPath, title) =>
     ipcRenderer.invoke('pdf:export', markdown, docPath, title, docPath ? dirToBaseHref(dirname(docPath)) : null),
 
+  pickImage: () => ipcRenderer.invoke('image:pick'),
+  resolveImage: (request) => ipcRenderer.invoke('image:resolve', request),
+
   getRecent: () => ipcRenderer.invoke('recent:get'),
   clearRecent: () => ipcRenderer.invoke('recent:clear'),
   onRecentChanged: (cb) => ipcRenderer.on('recent:changed', (_e, paths) => cb(paths)),

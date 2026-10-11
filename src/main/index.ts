@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
-import { readFile, writeFile, stat } from 'node:fs/promises'
-import { basename, dirname, extname, join } from 'node:path'
+import { access, mkdir, readFile, writeFile, stat } from 'node:fs/promises'
+import { basename, dirname, extname, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { MenuAction, OpenedFile, ThemeSetting, UnsavedChoice } from '../shared/api'
+import type { ImageRequest, MenuAction, OpenedFile, ResolvedImage, ThemeSetting, UnsavedChoice } from '../shared/api'
 import { FILE_HOST, FILE_SCHEME } from '../shared/fileUrl'
 
 const MARKDOWN_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd', 'txt']
@@ -19,6 +19,7 @@ const IMAGE_MIME: Record<string, string> = {
   '.avif': 'image/avif',
 }
 const MAX_RECENT = 10
+const EMBED_WARN_BYTES = 5 * 1024 * 1024
 
 let mainWindow: BrowserWindow | null = null
 let allowClose = false
@@ -284,6 +285,100 @@ function registerFileProtocol(): void {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Images: embed or link                                             */
+/* ------------------------------------------------------------------ */
+
+/** Path usable as a markdown/URL reference ("img/my%20pic.png", "/C:/x.png"). */
+function toUrlPath(p: string): string {
+  let out = p.replace(/\\/g, '/')
+  if (/^[A-Za-z]:\//.test(out)) out = '/' + out
+  return out
+    .split('/')
+    .map((segment) => encodeURIComponent(segment).replace(/%3A/gi, ':'))
+    .join('/')
+}
+
+function timestamp(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+}
+
+async function uniquePath(dir: string, base: string, ext: string): Promise<string> {
+  for (let i = 0; ; i++) {
+    const candidate = join(dir, `${base}${i ? `-${i}` : ''}${ext}`)
+    try {
+      await access(candidate)
+    } catch {
+      return candidate
+    }
+  }
+}
+
+async function resolveImage(req: ImageRequest): Promise<ResolvedImage | null> {
+  const name = req.filePath ? basename(req.filePath) : req.name || 'image.png'
+  const ext = extname(name).toLowerCase()
+  const mime = req.mime || IMAGE_MIME[ext]
+  // Only ever read real image files from disk.
+  if (req.filePath && !IMAGE_MIME[ext]) return null
+  if (!req.filePath && !req.bytes) return null
+
+  const alt = basename(name, extname(name)).replace(/[[\]\\]/g, '') || 'image'
+  const size = req.filePath ? (await stat(req.filePath)).size : req.bytes!.byteLength
+  const docDir = req.docPath ? dirname(req.docPath) : null
+
+  type Choice = 'embed' | 'link' | 'save'
+  const choices: { label: string; value: Choice }[] = [{ label: 'Embed in Document', value: 'embed' }]
+  const detail = ['Embed stores the image inside the markdown file. The document stays self-contained but gets larger.']
+  if (req.filePath) {
+    choices.push({ label: 'Link to File', value: 'link' })
+    detail.push(
+      docDir
+        ? 'Link references the image file by a path relative to the document.'
+        : 'Link references the image file by its absolute path. Save the document first to get a relative path.',
+    )
+  } else if (docDir) {
+    choices.push({ label: 'Save Next to Document', value: 'save' })
+    detail.push('Save copies the image into an "images" folder next to the document and links it.')
+  } else {
+    detail.push('Save the document first to store pasted images as separate files.')
+  }
+  if (size > EMBED_WARN_BYTES) {
+    detail.push(`This image is ${(size / 1024 / 1024).toFixed(1)} MB, embedding it makes the document large.`)
+  }
+
+  const buttons = [...choices.map((c) => c.label), 'Cancel']
+  const { response } = await dialog.showMessageBox(mainWindow!, {
+    type: 'question',
+    message: `Insert image "${name}"`,
+    detail: detail.join('\n\n'),
+    buttons,
+    defaultId: 0,
+    cancelId: buttons.length - 1,
+  })
+  const choice = choices[response]?.value
+  if (!choice) return null
+
+  if (choice === 'embed') {
+    const data = req.filePath ? await readFile(req.filePath) : Buffer.from(req.bytes!)
+    return { src: `data:${mime || 'image/png'};base64,${data.toString('base64')}`, alt }
+  }
+
+  if (choice === 'link') {
+    const target = docDir ? relative(docDir, req.filePath!) : req.filePath!
+    return { src: toUrlPath(target), alt }
+  }
+
+  // save: write clipboard data next to the document
+  const imagesDir = join(docDir!, 'images')
+  await mkdir(imagesDir, { recursive: true })
+  const outExt = Object.keys(IMAGE_MIME).find((e) => IMAGE_MIME[e] === mime) ?? '.png'
+  const target = await uniquePath(imagesDir, `pasted-image-${timestamp()}`, outExt)
+  await writeFile(target, Buffer.from(req.bytes!))
+  return { src: toUrlPath(relative(docDir!, target)), alt }
+}
+
+/* ------------------------------------------------------------------ */
 /*  PDF export                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -419,6 +514,23 @@ function registerIpc(): void {
       }
     },
   )
+
+  ipcMain.handle('image:pick', async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: Object.keys(IMAGE_MIME).map((e) => e.slice(1)) }],
+    })
+    return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle('image:resolve', async (_e, req: ImageRequest) => {
+    try {
+      return await resolveImage(req)
+    } catch (err) {
+      dialog.showErrorBox('Could not insert image', (err as Error).message)
+      return null
+    }
+  })
 
   ipcMain.handle('theme:get', () => nativeTheme.themeSource)
   ipcMain.handle('theme:set', (_e, theme: ThemeSetting) => setTheme(theme))

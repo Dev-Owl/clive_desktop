@@ -13,6 +13,10 @@ Electron + Vue on top of [`@dev_owl/cliveedit`](https://github.com/Dev-Owl/clive
 - Local images relative to the document (`./img/a.png`) or absolute paths are
   shown in the editor and the PDF; missing files fail gracefully as broken images
 - Open via drag & drop, command line, or OS file association
+- Insert images from the toolbar, by drag & drop or by pasting; you choose
+  whether to **embed** them (base64) or **link** them (relative path, or
+  pasted screenshots saved to an `images/` folder next to the document)
+- Insert links with a small dialog (toolbar or Cmd/Ctrl+K); Cmd/Ctrl+P exports a PDF
 - Light / dark theme following the OS by default; override with the toolbar
   button or *View → Appearance* (also applies to native dialogs; PDFs are
   always light)
