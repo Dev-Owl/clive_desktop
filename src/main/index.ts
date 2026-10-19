@@ -1,9 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell } from 'electron'
 import type { MenuItemConstructorOptions } from 'electron'
+import { watch } from 'node:fs'
+import type { FSWatcher } from 'node:fs'
 import { access, mkdir, readFile, writeFile, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import type { ImageRequest, MenuAction, OpenedFile, ResolvedImage, ThemeSetting, UnsavedChoice } from '../shared/api'
+import type { DiskChange, ImageRequest, MenuAction, OpenedFile, ResolvedImage, ThemeSetting, UnsavedChoice } from '../shared/api'
 import { FILE_HOST, FILE_SCHEME } from '../shared/fileUrl'
 
 const MARKDOWN_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd', 'txt']
@@ -86,6 +88,8 @@ function createMainWindow(): void {
 
   hardenNavigation(win)
   win.once('ready-to-show', () => win.show())
+  // Catch changes a watcher missed (network drives, sleep, …).
+  win.on('focus', () => watchers.forEach((_w, path) => scheduleCheck(path)))
 
   // Ask the renderer whether there are unsaved changes before closing.
   win.on('close', (event) => {
@@ -95,6 +99,7 @@ function createMainWindow(): void {
   })
   win.on('closed', () => {
     if (mainWindow === win) mainWindow = null
+    setWatched([])
   })
 
   loadRenderer(win)
@@ -423,11 +428,98 @@ async function renderPdf(markdown: string, baseHref: string | null): Promise<Buf
 }
 
 /* ------------------------------------------------------------------ */
+/*  External changes                                                  */
+/* ------------------------------------------------------------------ */
+
+// Open documents are watched so edits made by other programs can be
+// offered for reload. The folder is watched rather than the file itself:
+// many editors save by writing a new file and renaming it over the old
+// one, which ends a watch on the file. Changes are detected by content, so
+// our own saves (and touch-only updates) never count as a change.
+
+const watchers = new Map<string, FSWatcher>()
+const checkTimers = new Map<string, ReturnType<typeof setTimeout>>()
+/** Content last read from / written to disk, null when the file is missing. */
+const diskText = new Map<string, string | null>()
+
+async function readDisk(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}
+
+async function checkFile(path: string): Promise<void> {
+  if (!watchers.has(path)) return
+  let content: string | null
+  try {
+    content = await readDisk(path)
+  } catch {
+    return // unreadable for now (locked, permissions) — try again on the next event
+  }
+  if (!watchers.has(path) || content === diskText.get(path)) return
+  diskText.set(path, content)
+  const change: DiskChange = { path, content }
+  mainWindow?.webContents.send('file:changed', change)
+}
+
+/** Writers often emit several events per save — wait for them to finish. */
+function scheduleCheck(path: string): void {
+  clearTimeout(checkTimers.get(path))
+  checkTimers.set(
+    path,
+    setTimeout(() => {
+      checkTimers.delete(path)
+      checkFile(path)
+    }, 200),
+  )
+}
+
+function setWatched(paths: string[]): void {
+  const wanted = new Set(paths)
+  for (const [path, watcher] of watchers) {
+    if (wanted.has(path)) continue
+    watcher.close()
+    watchers.delete(path)
+    clearTimeout(checkTimers.get(path))
+    checkTimers.delete(path)
+    diskText.delete(path)
+  }
+  for (const path of wanted) {
+    if (watchers.has(path)) continue
+    const name = basename(path)
+    try {
+      const watcher = watch(dirname(path), (_event, filename) => {
+        if (!filename || filename.toString() === name) scheduleCheck(path)
+      })
+      watcher.on('error', () => {
+        watcher.close()
+        if (watchers.get(path) === watcher) watchers.delete(path)
+      })
+      watchers.set(path, watcher)
+    } catch {
+      continue // folder gone or not watchable — the focus check can't help either
+    }
+    // Normally known from opening the file; otherwise take the current state.
+    if (!diskText.has(path)) readDisk(path).then((c) => diskText.has(path) || diskText.set(path, c), () => {})
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /*  IPC                                                               */
 /* ------------------------------------------------------------------ */
 
 async function readMarkdown(path: string): Promise<OpenedFile> {
-  return { path, content: await readFile(path, 'utf8') }
+  const content = await readFile(path, 'utf8')
+  diskText.set(path, content)
+  return { path, content }
+}
+
+async function writeMarkdown(path: string, content: string): Promise<void> {
+  await writeFile(path, content, 'utf8')
+  diskText.set(path, content)
 }
 
 const markdownFilters = [
@@ -470,7 +562,7 @@ function registerIpc(): void {
 
   ipcMain.handle('file:save', async (_e, path: string, content: string) => {
     try {
-      await writeFile(path, content, 'utf8')
+      await writeMarkdown(path, content)
       await addRecent(path)
       return { ok: true }
     } catch (err) {
@@ -485,7 +577,7 @@ function registerIpc(): void {
     })
     if (result.canceled || !result.filePath) return null
     try {
-      await writeFile(result.filePath, content, 'utf8')
+      await writeMarkdown(result.filePath, content)
       await addRecent(result.filePath)
       return result.filePath
     } catch (err) {
@@ -530,6 +622,10 @@ function registerIpc(): void {
       dialog.showErrorBox('Could not insert image', (err as Error).message)
       return null
     }
+  })
+
+  ipcMain.on('file:watch', (event, paths: string[]) => {
+    if (event.sender === mainWindow?.webContents) setWatched(paths)
   })
 
   ipcMain.handle('theme:get', () => nativeTheme.themeSource)

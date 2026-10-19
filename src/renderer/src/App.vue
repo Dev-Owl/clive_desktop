@@ -14,6 +14,7 @@
           @mousedown.middle.prevent="closeTab(tab.id)"
         >
           <span class="tab__title">{{ tab.title }}</span>
+          <span v-if="tab.external" class="tab__changed" title="Changed on disk" aria-label="Changed on disk">!</span>
           <button
             class="tab__close"
             :class="{ 'tab__close--dirty': isDirty(tab) }"
@@ -56,6 +57,24 @@
 
     <main class="workspace">
       <div v-for="tab in tabs" v-show="tab.id === activeId" :key="tab.id" class="doc">
+        <div v-if="tab.external" class="disk-banner" role="alert">
+          <span class="disk-banner__text">
+            <template v-if="tab.external.content === null">
+              <strong>{{ tab.title }}</strong> was deleted or moved by another program.
+            </template>
+            <template v-else>
+              <strong>{{ tab.title }}</strong> was changed by another program.
+              <template v-if="isDirty(tab)">Reloading discards your unsaved changes.</template>
+            </template>
+          </span>
+          <template v-if="tab.external.content === null">
+            <button class="primary" @click="keepMine(tab)">Keep in Editor</button>
+          </template>
+          <template v-else>
+            <button class="primary" @click="reloadFromDisk(tab)">Reload</button>
+            <button @click="keepMine(tab)">Keep My Version</button>
+          </template>
+        </div>
         <CliveEdit
           v-model="tab.content"
           :toolbar-items="toolbarItems"
@@ -105,7 +124,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CliveEdit, defaultToolbarItems } from '@dev_owl/cliveedit'
 import type { EditorContext, ToolbarItem } from '@dev_owl/cliveedit'
-import type { MenuAction, ThemeSetting } from '../../shared/api'
+import type { DiskChange, MenuAction, ThemeSetting } from '../../shared/api'
 import { setDocumentBase } from './baseHref'
 import LinkDialog from './LinkDialog.vue'
 
@@ -118,6 +137,8 @@ interface Tab {
   saved: string
   /** Line ending of the file on disk, restored when saving */
   eol: '\n' | '\r\n'
+  /** Unanswered change made by another program (content null: deleted) */
+  external: { content: string | null } | null
 }
 
 const api = window.api
@@ -208,6 +229,7 @@ function newTab(file?: { path: string; content: string }): Tab {
         content: file.content,
         saved: file.content,
         eol: file.content.includes('\r\n') ? '\r\n' : '\n',
+        external: null,
       }
     : {
         id: nextId++,
@@ -216,6 +238,7 @@ function newTab(file?: { path: string; content: string }): Tab {
         content: '',
         saved: '',
         eol: api.platform === 'win32' ? '\r\n' : '\n',
+        external: null,
       }
   tabs.value.push(tab)
   activeId.value = tab.id
@@ -309,6 +332,7 @@ async function saveTab(tab: Tab, forceDialog = false): Promise<boolean> {
     tab.title = fileName(path)
   }
   tab.saved = content
+  tab.external = null
   return true
 }
 
@@ -316,6 +340,41 @@ async function saveActive(forceDialog = false): Promise<void> {
   await settle()
   const tab = activeTab.value
   if (tab && (await saveTab(tab, forceDialog))) showToast(`Saved ${tab.title}`)
+}
+
+/* ---- Changes made by other programs ---- */
+
+watch(
+  () => tabs.value.map((t) => t.path).filter((p): p is string => !!p),
+  (paths) => api.watchFiles(paths),
+  { immediate: true },
+)
+
+function onFileChanged({ path, content }: DiskChange): void {
+  const tab = tabs.value.find((t) => t.path === path)
+  if (!tab) return
+  // Back to what the editor already knows (e.g. a change was undone).
+  if (content !== null && normalize(content) === normalize(tab.saved)) {
+    tab.external = null
+    return
+  }
+  tab.external = { content }
+}
+
+function reloadFromDisk(tab: Tab): void {
+  const content = tab.external?.content
+  if (content == null) return
+  tab.content = content
+  tab.saved = content
+  tab.eol = content.includes('\r\n') ? '\r\n' : '\n'
+  tab.external = null
+}
+
+/** Keep the editor's text; it now differs from disk, so the tab is unsaved. */
+function keepMine(tab: Tab): void {
+  if (!tab.external) return
+  tab.saved = tab.external.content ?? ''
+  tab.external = null
 }
 
 /* ---- PDF ---- */
@@ -463,6 +522,7 @@ onMounted(async () => {
   window.addEventListener('keydown', onShortcut, true)
   api.onMenu((action) => menuHandlers[action]?.())
   api.onOpenPaths((paths) => paths.forEach(openPath))
+  api.onFileChanged(onFileChanged)
   api.onRecentChanged((paths) => (recent.value = paths))
   api.onThemeChanged((t) => (theme.value = t))
   theme.value = await api.getTheme()

@@ -5,6 +5,12 @@ export interface OpenedFile {
   content: string
 }
 
+/** A document changed by another program; content is null when it was deleted. */
+export interface DiskChange {
+  path: string
+  content: string | null
+}
+
 /** An image the user wants to insert (picked, dropped or pasted). */
 export interface ImageRequest {
   /** Path of the document being edited, null while unsaved */
@@ -45,6 +51,9 @@ export interface DesktopApi {
   saveFile(path: string, content: string): Promise<{ ok: true } | { error: string }>
   saveAsDialog(suggestedName: string, content: string): Promise<string | null>
   exportPdf(markdown: string, docPath: string | null, title: string): Promise<string | null>
+  /** Report the open documents, so changes made outside the app are noticed. */
+  watchFiles(paths: string[]): void
+  onFileChanged(cb: (change: DiskChange) => void): void
 
   /* images */
   pickImage(): Promise<string | null>

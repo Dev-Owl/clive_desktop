@@ -8,6 +8,9 @@
   --app-accent: #2f6feb;
   --app-hover: #eceef2;
   --app-toast-bg: #24292f;
+  --app-warn-bg: #fff8e1;
+  --app-warn-border: #f0d78c;
+  --app-warn-text: #9a6700;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, sans-serif;
   font-size: 14px;
   color: var(--app-text);
@@ -25,6 +28,9 @@
     --app-accent: #4c8dff;
     --app-hover: #2a2c31;
     --app-toast-bg: #3a3d44;
+    --app-warn-bg: #3a3220;
+    --app-warn-border: #5c4c22;
+    --app-warn-text: #e3b341;
   }
 
   html:not(.is-print) .cliveedit {
@@ -282,6 +288,39 @@ button {
   background: var(--app-toast-bg);
   color: #fff;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.2);
+}
+
+/* ---- File changed on disk ---- */
+
+.disk-banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--app-warn-bg);
+  border-bottom: 1px solid var(--app-warn-border);
+  color: var(--app-text);
+}
+.disk-banner__text { flex: 1; min-width: 0; }
+.disk-banner button {
+  padding: 4px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-surface);
+}
+.disk-banner button.primary {
+  background: var(--app-accent);
+  border-color: var(--app-accent);
+  color: #fff;
+}
+.tab__changed {
+  flex: none;
+  margin-left: 4px;
+  color: var(--app-warn-text);
+  font-weight: 700;
 }
 
 /* ---- Hidden PDF window ---- */

@@ -12,6 +12,8 @@ const api: DesktopApi = {
   saveAsDialog: (name, content) => ipcRenderer.invoke('dialog:save-as', name, content),
   exportPdf: (markdown, docPath, title) =>
     ipcRenderer.invoke('pdf:export', markdown, docPath, title, docPath ? dirToBaseHref(dirname(docPath)) : null),
+  watchFiles: (paths) => ipcRenderer.send('file:watch', paths),
+  onFileChanged: (cb) => ipcRenderer.on('file:changed', (_e, change) => cb(change)),
 
   pickImage: () => ipcRenderer.invoke('image:pick'),
   resolveImage: (request) => ipcRenderer.invoke('image:resolve', request),
